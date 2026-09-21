@@ -67,9 +67,11 @@ coverage.xml
 .pytest_cache/
 cover/
 test.*
+test_prompt.py
 
 # REPL history
 .python_history
 .indent_history
 
 flow.png
+indent.bat

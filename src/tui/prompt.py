@@ -81,6 +81,12 @@ def is_bash_mode():
     return False
 
 
+_prompt_prefix = "❯❯"
+
+def set_prompt_prefix(prefix: str):
+    global _prompt_prefix
+    _prompt_prefix = prefix
+
 def get_prompt_message():
     """
     Draws a full-width horizontal rule above the input area,
@@ -91,7 +97,7 @@ def get_prompt_message():
 
     if is_bash_mode():
         return HTML(f'<box>{top_line}</box>\n<box>│</box> ')
-    return HTML(f'<box>{top_line}</box>\n<box>│</box> <prompt>❯❯</prompt> ')
+    return HTML(f'<box>{top_line}</box>\n<box>│</box> <prompt>{_prompt_prefix}</prompt> ')
 
 
 def get_prompt_continuation(width, line_number, is_soft_wrap):

@@ -18,6 +18,10 @@ class PlanUpdaterOutput(BaseModel):
     """Structured output for the plan_updater LLM node."""
     plan: str = Field(description="The updated execution plan incorporating user answers.")
 
+class AlternateArchitectureOutput(BaseModel):
+    """Structured output for the alternate_architecture_llm node."""
+    questions: list[str] = Field(description="Clarifying questions for an alternative architecture.")
+
 class IndentState(TypedDict):
     """Core memory schema for the LangGraph state machine."""
     messages: Annotated[list, add_messages]
@@ -27,3 +31,5 @@ class IndentState(TypedDict):
     plan: str | None
     questions: list[str] | None
     answers: list[str] | None
+    rejection_feedback: str | None
+    is_approved: bool | None

@@ -121,70 +121,138 @@ def query_planner(state: IndentState) -> dict:
     }
 
 def check_for_questions(state: IndentState) -> str:
-    """Routes to the interrupt node if the planner generated questions."""
+    """Routes to the interrupt node if the planner generated questions, otherwise jumps to approval."""
     questions = state.get("questions", [])
     if questions and len(questions) > 0:
         return "ask_user_questions"
-    return END
+    return "ask_plan_approval"
 
 def ask_user_questions(state: IndentState) -> dict:
-    """Interrupts execution to pause and surface questions to the human in the loop."""
     from langgraph.types import interrupt
-    user_answers = interrupt(state.get("questions", []))
+    user_answers = interrupt({
+        "type": "ask_questions",
+        "questions": state.get("questions", [])
+    })
     return {"answers": user_answers}
 
 def plan_updater(state: IndentState) -> dict:
-    """Rewrites the architectural plan incorporating the human's answers."""
     from .state import PlanUpdaterOutput
     structured_llm = model.with_structured_output(PlanUpdaterOutput, strict=True)
     
-    plan = state.get("plan", "")
-    questions = state.get("questions", [])
-    answers = state.get("answers", [])
+    prompt = (
+        "You are the Indent plan updater.\n"
+        f"Original Plan: {state.get('plan', '')}\n\n"
+        f"Questions asked: {state.get('questions', [])}\n"
+        f"User Answers: {state.get('answers', [])}\n\n"
+        "Rewrite the plan incorporating the user's architectural decisions."
+    )
+    result = structured_llm.invoke(prompt)
+    return {"plan": result.plan, "questions": [], "answers": []}
+
+def ask_plan_approval(state: IndentState) -> dict:
+    from langgraph.types import interrupt
+    decision = interrupt({
+        "type": "ask_approval",
+        "plan": state.get("plan", "")
+    })
+    return {"is_approved": decision}
+
+def check_approval(state: IndentState) -> str:
+    if state.get("is_approved"):
+        return END
+    return "ask_rejection_feedback"
+
+def ask_rejection_feedback(state: IndentState) -> dict:
+    from langgraph.types import interrupt
+    feedback = interrupt({"type": "ask_feedback"})
+    return {"rejection_feedback": feedback}
+
+def alternate_architecture_llm(state: IndentState) -> dict:
+    from .state import AlternateArchitectureOutput
+    structured_llm = model.with_structured_output(AlternateArchitectureOutput, strict=True)
+    
+    prompt = (
+        "You are the Indent alternate architecture planner.\n"
+        f"Original Plan: {state.get('plan', '')}\n\n"
+        f"User's Rejection Feedback: {state.get('rejection_feedback', '')}\n\n"
+        "Based on the user's feedback, generate specific clarifying questions to determine a new architectural approach."
+    )
+    result = structured_llm.invoke(prompt)
+    return {"questions": result.questions}
+
+def ask_alternate_questions(state: IndentState) -> dict:
+    from langgraph.types import interrupt
+    user_answers = interrupt({
+        "type": "ask_questions",
+        "questions": state.get("questions", [])
+    })
+    return {"answers": user_answers}
+
+def plan_updater_llm(state: IndentState) -> dict:
+    from .state import PlanUpdaterOutput
+    structured_llm = model.with_structured_output(PlanUpdaterOutput, strict=True)
     
     prompt = (
         "You are the Indent plan updater.\n"
-        f"Original Plan: {plan}\n\n"
-        f"Questions asked: {questions}\n"
-        f"User Answers: {answers}\n\n"
-        "Rewrite the plan incorporating the user's architectural decisions."
+        f"Previous Plan: {state.get('plan', '')}\n\n"
+        f"Alternate Questions asked: {state.get('questions', [])}\n"
+        f"User Answers: {state.get('answers', [])}\n\n"
+        "Rewrite the execution plan incorporating the user's new architectural decisions."
     )
-    
     result = structured_llm.invoke(prompt)
-    
+    return {"plan": result.plan, "questions": [], "answers": []}
+
+def ask_revised_plan_approval(state: IndentState) -> dict:
+    from langgraph.types import interrupt
+    decision = interrupt({
+        "type": "ask_approval",
+        "plan": state.get("plan", "")
+    })
+    return {"is_approved": decision}
+
+def check_revised_approval(state: IndentState) -> str:
+    if state.get("is_approved"):
+        return END
+    return "reset_state"
+
+def reset_state(state: IndentState) -> dict:
     return {
-        "plan": result.plan,
-        "questions": [],  
-        "answers": []
+        "plan": "",
+        "questions": [],
+        "answers": [],
+        "rejection_feedback": "",
+        "is_approved": None
     }
 
 def build_graph():
-    """Builds and compiles the foundational LangGraph state machine."""
     builder = StateGraph(IndentState)
     
     builder.add_node("workspace_analyzer", workspace_analyzer)
     builder.add_node("query_planner", query_planner)
     builder.add_node("ask_user_questions", ask_user_questions)
     builder.add_node("plan_updater", plan_updater)
+    builder.add_node("ask_plan_approval", ask_plan_approval)
+    builder.add_node("ask_rejection_feedback", ask_rejection_feedback)
+    builder.add_node("alternate_architecture_llm", alternate_architecture_llm)
+    builder.add_node("ask_alternate_questions", ask_alternate_questions)
+    builder.add_node("plan_updater_llm", plan_updater_llm)
+    builder.add_node("ask_revised_plan_approval", ask_revised_plan_approval)
+    builder.add_node("reset_state", reset_state)
     
     builder.add_edge(START, "workspace_analyzer")
     
-    builder.add_conditional_edges(
-        "workspace_analyzer",
-        check_for_query,
-        {"query_planner": "query_planner", END: END}
-    )
-    
-    builder.add_conditional_edges(
-        "query_planner",
-        check_for_questions,
-        {"ask_user_questions": "ask_user_questions", END: END}
-    )
-    
+    builder.add_conditional_edges("workspace_analyzer", check_for_query, {"query_planner": "query_planner", END: END})
+    builder.add_conditional_edges("query_planner", check_for_questions, {"ask_user_questions": "ask_user_questions", "ask_plan_approval": "ask_plan_approval"})
     builder.add_edge("ask_user_questions", "plan_updater")
-    builder.add_edge("plan_updater", END)
+    builder.add_edge("plan_updater", "ask_plan_approval")
+    builder.add_conditional_edges("ask_plan_approval", check_approval, {END: END, "ask_rejection_feedback": "ask_rejection_feedback"})
+    builder.add_edge("ask_rejection_feedback", "alternate_architecture_llm")
+    builder.add_edge("alternate_architecture_llm", "ask_alternate_questions")
+    builder.add_edge("ask_alternate_questions", "plan_updater_llm")
+    builder.add_edge("plan_updater_llm", "ask_revised_plan_approval")
+    builder.add_conditional_edges("ask_revised_plan_approval", check_revised_approval, {END: END, "reset_state": "reset_state"})
+    builder.add_edge("reset_state", END)
     
-    checkpointer = MemorySaver()
-    return builder.compile(checkpointer=checkpointer)
+    return builder.compile(checkpointer=MemorySaver())
 
 indent_graph = build_graph()

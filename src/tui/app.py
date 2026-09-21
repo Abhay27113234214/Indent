@@ -50,12 +50,9 @@ class IndentCLI:
             try:
                 console.print(f"\n[{COLORS['dim']}]What would you like to build or modify?[/{COLORS['dim']}]")
                 user_input = self.session.prompt()
-
                 if not user_input.strip():
                     continue
-
                 self.handle_input(user_input)
-
             except KeyboardInterrupt:
                 continue
             except EOFError:
@@ -76,11 +73,9 @@ class IndentCLI:
         cmd = text[1:].strip()
 
         console.print(f"[{COLORS['red']} bold]![/{COLORS['red']} bold] [{COLORS['red']}]{cmd}[/{COLORS['red']}]")
-
         if cmd:
             try:
                 result = subprocess.run(["bash", "-c", cmd], text=True, capture_output=True)
-
                 if result.stdout:
                     console.print(
                         Syntax(
@@ -93,10 +88,8 @@ class IndentCLI:
                     )
                 if result.stderr:
                     console.print(f"[{COLORS['red']}]{result.stderr.rstrip()}[/{COLORS['red']}]")
-
             except Exception as e:
                 console.print(f"[{COLORS['red']} bold]Error:[/{COLORS['red']} bold] [{COLORS['red']}]{str(e)}[/{COLORS['red']}]")
-
         self._print_divider()
 
 
@@ -138,6 +131,33 @@ class IndentCLI:
         console.print(help_table)
 
 
+    def _get_user_answer(self, q_idx: int, question: str) -> str:
+        """Prompts for an answer, allowing the user to seamlessly execute / or ! commands."""
+        from .prompt import set_prompt_prefix
+        
+        console.print(f"[{COLORS['yellow']}]Q{q_idx}: {question}[/{COLORS['yellow']}]")
+        
+        set_prompt_prefix(f"A{q_idx}:")
+        
+        try:
+            while True:
+                ans = self.session.prompt().strip()
+                if not ans:
+                    continue
+                    
+                if ans.startswith('/'):
+                    self.handle_command(ans)
+                    if not self.running:
+                        raise EOFError()
+                    console.print(f"\n[{COLORS['yellow']}]Q{q_idx}: {question}[/{COLORS['yellow']}]")
+                elif ans.startswith('!'):
+                    self.handle_bash(ans)
+                    console.print(f"\n[{COLORS['yellow']}]Q{q_idx}: {question}[/{COLORS['yellow']}]")
+                else:
+                    return ans
+        finally:
+            set_prompt_prefix("❯❯")
+
     def process_chat(self, text: str):
         from langgraph.types import Command
         from backend.graph import indent_graph
@@ -153,27 +173,63 @@ class IndentCLI:
             
         snapshot = indent_graph.get_state(config)
         
-        if snapshot.next and snapshot.tasks and snapshot.tasks[0].interrupts:
-            questions = snapshot.tasks[0].interrupts[0].value
+        while snapshot.next and snapshot.tasks and snapshot.tasks[0].interrupts:
+            interrupt_data = snapshot.tasks[0].interrupts[0].value
+            int_type = interrupt_data.get("type")
             
-            console.print(f"\n[{COLORS['yellow']} bold]Clarification Required:[/{COLORS['yellow']} bold]")
-            answers = []
-            
-            for i, q in enumerate(questions):
-                console.print(f"[{COLORS['yellow']}]Q{i+1}: {q}[/{COLORS['yellow']}]")
-                ans = self.session.prompt(f"A{i+1}: ").strip()
-                answers.append(ans)
+            if int_type == "ask_questions":
+                questions = interrupt_data.get("questions", [])
+                console.print(f"\n[{COLORS['yellow']} bold]Clarification Required:[/{COLORS['yellow']} bold]")
+                answers = []
+                for i, q in enumerate(questions):
+                    ans = self._get_user_answer(i + 1, q)
+                    answers.append(ans)
+                resume_payload = answers
+                status_msg = "Updating architectural plan..."
                 
-            with console.status(f"[{COLORS['cyan']}]Updating architectural plan...[/{COLORS['cyan']}]", spinner="dots2"):
-                # Resume graph execution by feeding answers back into the interrupt point
-                indent_graph.invoke(Command(resume=answers), config=config)
+            elif int_type == "ask_approval":
+                plan = interrupt_data.get("plan", "")
+                console.print(f"\n[{COLORS['purple']} bold]Proposed Execution Plan:[/{COLORS['purple']} bold]")
+                console.print(Markdown(plan, code_theme="dracula"))
+                
+                console.print(f"\n[{COLORS['yellow']}]Do you approve this plan? (Y/n)[/{COLORS['yellow']}]")
+                from .prompt import set_prompt_prefix
+                set_prompt_prefix("Approval:")
+                try:
+                    while True:
+                        decision = self.session.prompt().strip().lower()
+                        if decision in ['y', 'yes', '']:
+                            resume_payload = True
+                            break
+                        elif decision in ['n', 'no']:
+                            resume_payload = False
+                            break
+                finally:
+                    set_prompt_prefix("❯❯")
+                status_msg = "Processing decision..."
+                
+            elif int_type == "ask_feedback":
+                console.print(f"\n[{COLORS['yellow']} bold]Plan Rejected.[/{COLORS['yellow']} bold]")
+                console.print(f"[{COLORS['yellow']}]Why do you reject this plan? What should change?[/{COLORS['yellow']}]")
+                
+                from .prompt import set_prompt_prefix
+                set_prompt_prefix("Feedback:")
+                try:
+                    resume_payload = self.session.prompt().strip()
+                finally:
+                    set_prompt_prefix("❯❯")
+                status_msg = "Drafting alternative architecture..."
+                
+            with console.status(f"[{COLORS['cyan']}]{status_msg}[/{COLORS['cyan']}]", spinner="dots2"):
+                indent_graph.invoke(Command(resume=resume_payload), config=config)
                 
             snapshot = indent_graph.get_state(config)
             
-        plan = snapshot.values.get("plan")
-        if plan:
-            console.print(f"\n[{COLORS['purple']} bold]Execution Plan:[/{COLORS['purple']} bold]")
-            console.print(Markdown(plan, code_theme="dracula"))
+        final_plan = snapshot.values.get("plan")
+        if final_plan:
+            console.print(f"\n[{COLORS['green']} bold]Plan Approved! Setup complete.[/{COLORS['green']} bold]")
+        else:
+            console.print(f"\n[{COLORS['red']}]Please be precise on your next request. Let's start anew.[/{COLORS['red']}]")
 
         elapsed = time.time() - start_time
         console.print(f"\n  [{COLORS['dim']}]⏱ {elapsed:.1f}s[/{COLORS['dim']}]")
