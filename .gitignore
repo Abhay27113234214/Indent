@@ -71,3 +71,5 @@ test.*
 # REPL history
 .python_history
 .indent_history
+
+flow.png

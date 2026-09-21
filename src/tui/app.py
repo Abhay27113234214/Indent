@@ -19,8 +19,31 @@ class IndentCLI:
         self.turn_count = 0
 
     def run(self):
-        self.running = True
+        import sys
+        
         print_welcome()
+
+        console.print(f"\n[{COLORS['yellow']}]Do you grant permission to analyze the workspace?[/{COLORS['yellow']}]")
+        permission = input(" (y/n) > ").strip().lower()
+        
+        if permission not in ['y', 'yes']:
+            print("we need permission to analyze the code base to work")
+            sys.exit(0)
+            
+        from backend.graph import indent_graph
+        
+        config = {"configurable": {"thread_id": "session_1"}}
+        
+        with console.status(f"[{COLORS['dim']}]Running workspace_analyzer node...[/{COLORS['dim']}]", spinner="dots"):
+            state = indent_graph.invoke({"messages": []}, config=config)
+            
+        console.print(f"[{COLORS['green']}]Workspace analyzed successfully![/{COLORS['green']}]")
+        
+        ctx = state.get("workspace_context")
+        if ctx:
+            console.print(f"  [{COLORS['dim']}]Detected stack: {', '.join(ctx.tech_stack)}[/{COLORS['dim']}]\n")
+
+        self.running = True
 
         while self.running:
             try:
