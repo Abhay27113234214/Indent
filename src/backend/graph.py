@@ -8,6 +8,21 @@ from langchain_azure_ai.chat_models import AzureAIOpenAIApiChatModel
 
 from .state import IndentState, WorkspaceContext
 
+COLORS = {
+    "cyan":     "#00e5ff",
+    "purple":   "#bd93f9",
+    "green":    "#50fa7b",
+    "yellow":   "#f1fa8c",
+    "red":      "#ff5555",
+    "orange":   "#ffb86c",
+    "pink":     "#ff79c6",
+    "white":    "#f8f8f2",
+    "dim":      "#6272a4",
+    "bg_dark":  "#282a36",
+    "bg_line":  "#44475a",
+    "shadow":   "#333645",
+}
+
 load_dotenv(find_dotenv())
 
 model = AzureAIOpenAIApiChatModel(
@@ -159,7 +174,7 @@ def ask_plan_approval(state: IndentState) -> dict:
 
 def check_approval(state: IndentState) -> str:
     if state.get("is_approved"):
-        return END
+        return "code_generator"
     return "ask_rejection_feedback"
 
 def ask_rejection_feedback(state: IndentState) -> dict:
@@ -212,7 +227,7 @@ def ask_revised_plan_approval(state: IndentState) -> dict:
 
 def check_revised_approval(state: IndentState) -> str:
     if state.get("is_approved"):
-        return END
+        return "code_generator"
     return "reset_state"
 
 def reset_state(state: IndentState) -> dict:
@@ -223,6 +238,66 @@ def reset_state(state: IndentState) -> dict:
         "rejection_feedback": "",
         "is_approved": None
     }
+
+def code_generator(state: IndentState) -> dict:
+    from .state import CodeGeneratorOutput
+    structured_llm = model.with_structured_output(CodeGeneratorOutput, strict=True)
+    
+    ctx = state.get("workspace_context")
+    prompt = (
+        "You are the Indent Code Generator.\n"
+        f"Approved Plan:\n{state.get('plan')}\n\n"
+        f"Workspace Context:\n{ctx.summary if ctx else 'None'}\n\n"
+        "Generate the exact list of file edits needed to implement this plan."
+    )
+    result = structured_llm.invoke(prompt)
+    edits = [edit.model_dump() for edit in result.file_edits]
+    return {"file_edits": edits}
+
+def file_writing_agent(state: IndentState) -> dict:
+    """Deterministic Python agent that strictly applies the LLM's requested file edits."""
+    from rich.console import Console
+    console = Console()
+    
+    edits = state.get("file_edits", [])
+    for edit in edits:
+        file_path = edit.get("file_path")
+        action = edit.get("action", "").lower()
+        search_block = edit.get("search_block", "")
+        replace_block = edit.get("replace_block", "")
+        
+        try:
+            if action == "new":
+                dir_name = os.path.dirname(os.path.abspath(file_path))
+                if dir_name:
+                    os.makedirs(dir_name, exist_ok=True)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(replace_block)
+            else:
+                if not os.path.exists(file_path):
+                    console.print(f"[{COLORS['red']}]Warning: File {file_path} does not exist for edit action '{action}'[/{COLORS['red']}]")
+                    continue
+                    
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    
+                if search_block and search_block not in content:
+                    console.print(f"[{COLORS['yellow']}]Warning: Search block not found in {file_path}. Skipping replacement.[/{COLORS['yellow']}]")
+                    continue
+                    
+                if action == "replace":
+                    content = content.replace(search_block, replace_block)
+                elif action == "remove":
+                    content = content.replace(search_block, "")
+                elif action == "add":
+                    content = content.replace(search_block, search_block + "\n" + replace_block)
+                    
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+        except Exception as e:
+            console.print(f"[{COLORS['red']}]Error writing to {file_path}: {e}[/{COLORS['red']}]")
+            
+    return {}
 
 def build_graph():
     builder = StateGraph(IndentState)
@@ -238,6 +313,8 @@ def build_graph():
     builder.add_node("plan_updater_llm", plan_updater_llm)
     builder.add_node("ask_revised_plan_approval", ask_revised_plan_approval)
     builder.add_node("reset_state", reset_state)
+    builder.add_node("code_generator", code_generator)
+    builder.add_node("file_writing_agent", file_writing_agent)
     
     builder.add_edge(START, "workspace_analyzer")
     
@@ -245,13 +322,15 @@ def build_graph():
     builder.add_conditional_edges("query_planner", check_for_questions, {"ask_user_questions": "ask_user_questions", "ask_plan_approval": "ask_plan_approval"})
     builder.add_edge("ask_user_questions", "plan_updater")
     builder.add_edge("plan_updater", "ask_plan_approval")
-    builder.add_conditional_edges("ask_plan_approval", check_approval, {END: END, "ask_rejection_feedback": "ask_rejection_feedback"})
+    builder.add_conditional_edges("ask_plan_approval", check_approval, {"code_generator": "code_generator", "ask_rejection_feedback": "ask_rejection_feedback"})
     builder.add_edge("ask_rejection_feedback", "alternate_architecture_llm")
     builder.add_edge("alternate_architecture_llm", "ask_alternate_questions")
     builder.add_edge("ask_alternate_questions", "plan_updater_llm")
     builder.add_edge("plan_updater_llm", "ask_revised_plan_approval")
-    builder.add_conditional_edges("ask_revised_plan_approval", check_revised_approval, {END: END, "reset_state": "reset_state"})
+    builder.add_conditional_edges("ask_revised_plan_approval", check_revised_approval, {"code_generator": "code_generator", "reset_state": "reset_state"})
     builder.add_edge("reset_state", END)
+    builder.add_edge("code_generator", "file_writing_agent")
+    builder.add_edge("file_writing_agent", END)
     
     return builder.compile(checkpointer=MemorySaver())
 

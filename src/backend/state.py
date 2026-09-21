@@ -22,6 +22,17 @@ class AlternateArchitectureOutput(BaseModel):
     """Structured output for the alternate_architecture_llm node."""
     questions: list[str] = Field(description="Clarifying questions for an alternative architecture.")
 
+class FileEdit(BaseModel):
+    """A specific file edit operation."""
+    file_path: str = Field(description="The relative path to the file.")
+    action: str = Field(description="The action to perform: 'new', 'replace', 'add', 'remove'")
+    search_block: str = Field(description="The exact text to find in the file. Empty if 'new'.")
+    replace_block: str = Field(description="The exact text to replace it with. Empty if 'remove'.")
+
+class CodeGeneratorOutput(BaseModel):
+    """Structured output for the code_generator LLM node."""
+    file_edits: list[FileEdit] = Field(description="List of file edits to execute the approved plan.")
+
 class IndentState(TypedDict):
     """Core memory schema for the LangGraph state machine."""
     messages: Annotated[list, add_messages]
@@ -33,3 +44,4 @@ class IndentState(TypedDict):
     answers: list[str] | None
     rejection_feedback: str | None
     is_approved: bool | None
+    file_edits: list[dict] | None

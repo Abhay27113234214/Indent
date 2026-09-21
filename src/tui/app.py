@@ -206,7 +206,7 @@ class IndentCLI:
                             break
                 finally:
                     set_prompt_prefix("❯❯")
-                status_msg = "Processing decision..."
+                status_msg = "Executing approved plan and generating code..."
                 
             elif int_type == "ask_feedback":
                 console.print(f"\n[{COLORS['yellow']} bold]Plan Rejected.[/{COLORS['yellow']} bold]")
@@ -226,9 +226,22 @@ class IndentCLI:
             snapshot = indent_graph.get_state(config)
             
         final_plan = snapshot.values.get("plan")
-        if final_plan:
-            console.print(f"\n[{COLORS['green']} bold]Plan Approved! Setup complete.[/{COLORS['green']} bold]")
-        else:
+        is_approved = snapshot.values.get("is_approved")
+        file_edits = snapshot.values.get("file_edits", [])
+        
+        if is_approved and file_edits:
+            console.print(f"\n[{COLORS['green']} bold]Execution Complete! Modified Files:[/{COLORS['green']} bold]")
+            from rich.table import Table
+            table = Table(show_header=False, box=None, padding=(0, 2))
+            for edit in file_edits:
+                action = edit.get('action', '').upper()
+                path = edit.get('file_path', '')
+                color = "green" if action == "NEW" else "cyan" if action == "REPLACE" else "yellow"
+                table.add_row(f"[{color}]{action}[/{color}]", path)
+            console.print(table)
+        elif is_approved:
+            console.print(f"\n[{COLORS['green']} bold]Plan Approved! Setup complete. (No file edits required)[/{COLORS['green']} bold]")
+        elif final_plan == "":
             console.print(f"\n[{COLORS['red']}]Please be precise on your next request. Let's start anew.[/{COLORS['red']}]")
 
         elapsed = time.time() - start_time
