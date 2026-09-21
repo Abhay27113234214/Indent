@@ -9,10 +9,21 @@ class WorkspaceContext(BaseModel):
     structure_overview: str = Field(description="A brief overview of the directory structure.")
     project_prediction: str = Field(description="An educated guess on what the user is trying to build or achieve.")
 
+class QueryPlannerOutput(BaseModel):
+    """Structured output for the query_planner LLM node."""
+    plan: str = Field(description="The proposed execution plan or high-level architecture.")
+    questions: list[str] = Field(description="Clarifying questions if the architecture or requirements are ambiguous. Empty list if none.")
+
+class PlanUpdaterOutput(BaseModel):
+    """Structured output for the plan_updater LLM node."""
+    plan: str = Field(description="The updated execution plan incorporating user answers.")
+
 class IndentState(TypedDict):
     """Core memory schema for the LangGraph state machine."""
     messages: Annotated[list, add_messages]
     workspace_context: WorkspaceContext | None
     file_list: list[str] | None
+    user_query: str | None
     plan: str | None
     questions: list[str] | None
+    answers: list[str] | None

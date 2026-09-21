@@ -87,14 +87,102 @@ def workspace_analyzer(state: IndentState) -> dict:
         "file_list": tree_structure
     }
 
+def check_for_query(state: IndentState) -> str:
+    """Routes to END if this is just an initialization pass, else proceeds to query_planner."""
+    query = state.get("user_query", "")
+    if query and query.strip():
+        return "query_planner"
+    return END
+
+def query_planner(state: IndentState) -> dict:
+    """Drafts an execution plan and asks clarifying questions if requirements are ambiguous."""
+    from .state import QueryPlannerOutput
+    structured_llm = model.with_structured_output(QueryPlannerOutput, strict=True)
+    
+    ctx = state.get("workspace_context")
+    query = state.get("user_query", "")
+    
+    summary = ctx.summary if ctx else "No context"
+    stack = ctx.tech_stack if ctx else "No stack"
+    
+    prompt = (
+        "You are the Indent query planner.\n"
+        f"Workspace Summary: {summary}\n"
+        f"Tech Stack: {stack}\n\n"
+        f"User Query: {query}\n\n"
+        "Draft an execution plan. Do not make assumptions about missing architectural details. "
+        "If critical decisions are unspecified, leave the plan high-level and output specific clarifying questions."
+    )
+    
+    result = structured_llm.invoke(prompt)
+    return {
+        "plan": result.plan,
+        "questions": result.questions
+    }
+
+def check_for_questions(state: IndentState) -> str:
+    """Routes to the interrupt node if the planner generated questions."""
+    questions = state.get("questions", [])
+    if questions and len(questions) > 0:
+        return "ask_user_questions"
+    return END
+
+def ask_user_questions(state: IndentState) -> dict:
+    """Interrupts execution to pause and surface questions to the human in the loop."""
+    from langgraph.types import interrupt
+    user_answers = interrupt(state.get("questions", []))
+    return {"answers": user_answers}
+
+def plan_updater(state: IndentState) -> dict:
+    """Rewrites the architectural plan incorporating the human's answers."""
+    from .state import PlanUpdaterOutput
+    structured_llm = model.with_structured_output(PlanUpdaterOutput, strict=True)
+    
+    plan = state.get("plan", "")
+    questions = state.get("questions", [])
+    answers = state.get("answers", [])
+    
+    prompt = (
+        "You are the Indent plan updater.\n"
+        f"Original Plan: {plan}\n\n"
+        f"Questions asked: {questions}\n"
+        f"User Answers: {answers}\n\n"
+        "Rewrite the plan incorporating the user's architectural decisions."
+    )
+    
+    result = structured_llm.invoke(prompt)
+    
+    return {
+        "plan": result.plan,
+        "questions": [],  
+        "answers": []
+    }
+
 def build_graph():
     """Builds and compiles the foundational LangGraph state machine."""
     builder = StateGraph(IndentState)
     
     builder.add_node("workspace_analyzer", workspace_analyzer)
+    builder.add_node("query_planner", query_planner)
+    builder.add_node("ask_user_questions", ask_user_questions)
+    builder.add_node("plan_updater", plan_updater)
     
     builder.add_edge(START, "workspace_analyzer")
-    builder.add_edge("workspace_analyzer", END)
+    
+    builder.add_conditional_edges(
+        "workspace_analyzer",
+        check_for_query,
+        {"query_planner": "query_planner", END: END}
+    )
+    
+    builder.add_conditional_edges(
+        "query_planner",
+        check_for_questions,
+        {"ask_user_questions": "ask_user_questions", END: END}
+    )
+    
+    builder.add_edge("ask_user_questions", "plan_updater")
+    builder.add_edge("plan_updater", END)
     
     checkpointer = MemorySaver()
     return builder.compile(checkpointer=checkpointer)

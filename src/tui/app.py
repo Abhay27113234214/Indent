@@ -48,6 +48,7 @@ class IndentCLI:
 
         while self.running:
             try:
+                console.print(f"\n[{COLORS['dim']}]What would you like to build or modify?[/{COLORS['dim']}]")
                 user_input = self.session.prompt()
 
                 if not user_input.strip():
@@ -138,37 +139,44 @@ class IndentCLI:
 
 
     def process_chat(self, text: str):
+        from langgraph.types import Command
+        from backend.graph import indent_graph
+        
         self.turn_count += 1
-
         console.print(f"[{COLORS['green']} bold]>>[/{COLORS['green']} bold] [{COLORS['green']}]{text}[/{COLORS['green']}]")
-
+        
         start_time = time.time()
-
-        self._animate_thinking()
-
-        mock_response = (
-            "I have received your request and am analyzing the context.\n\n"
-            "Since I am designed as an **Agentic AI Platform**, "
-            "I will be able to perform terminal actions, write files, and integrate seamlessly.\n\n"
-            "```python\n"
-            "# I am generating some Python code live for you!\n"
-            "def execute_task(task_name: str):\n"
-            "    print(f'Executing: {task_name}')\n"
-            "    return True\n"
-            "```\n\n"
-            "What's our next step?"
-        )
-
-        self._stream_response(mock_response)
+        config = {"configurable": {"thread_id": "session_1"}}
+        
+        with console.status(f"[{COLORS['cyan']}]Analyzing and planning...[/{COLORS['cyan']}]", spinner="dots"):
+            indent_graph.invoke({"user_query": text}, config=config)
+            
+        snapshot = indent_graph.get_state(config)
+        
+        if snapshot.next and snapshot.tasks and snapshot.tasks[0].interrupts:
+            questions = snapshot.tasks[0].interrupts[0].value
+            
+            console.print(f"\n[{COLORS['yellow']} bold]Clarification Required:[/{COLORS['yellow']} bold]")
+            answers = []
+            
+            for i, q in enumerate(questions):
+                console.print(f"[{COLORS['yellow']}]Q{i+1}: {q}[/{COLORS['yellow']}]")
+                ans = self.session.prompt(f"A{i+1}: ").strip()
+                answers.append(ans)
+                
+            with console.status(f"[{COLORS['cyan']}]Updating architectural plan...[/{COLORS['cyan']}]", spinner="dots2"):
+                # Resume graph execution by feeding answers back into the interrupt point
+                indent_graph.invoke(Command(resume=answers), config=config)
+                
+            snapshot = indent_graph.get_state(config)
+            
+        plan = snapshot.values.get("plan")
+        if plan:
+            console.print(f"\n[{COLORS['purple']} bold]Execution Plan:[/{COLORS['purple']} bold]")
+            console.print(Markdown(plan, code_theme="dracula"))
 
         elapsed = time.time() - start_time
-        token_estimate = len(mock_response.split())
-        console.print(
-            f"  [{COLORS['dim']}]⏱ {elapsed:.1f}s  •  "
-            f"~{token_estimate} tokens  •  "
-            f"gemini-3.1-pro[/{COLORS['dim']}]"
-        )
-
+        console.print(f"\n  [{COLORS['dim']}]⏱ {elapsed:.1f}s[/{COLORS['dim']}]")
         self._print_divider(f"turn {self.turn_count}")
 
 
