@@ -38,10 +38,11 @@ class IndentCLI:
             state = indent_graph.invoke({"messages": []}, config=config)
             
         console.print(f"[{COLORS['green']}]Workspace analyzed successfully![/{COLORS['green']}]")
-        
         ctx = state.get("workspace_context")
         if ctx:
-            console.print(f"  [{COLORS['dim']}]Detected stack: {', '.join(ctx.tech_stack)}[/{COLORS['dim']}]\n")
+            console.print(f"  [{COLORS['cyan']}]● Summary:   [/{COLORS['cyan']}][{COLORS['dim']}]{ctx.summary}[/{COLORS['dim']}]")
+            console.print(f"  [{COLORS['purple']}]● Stack:     [/{COLORS['purple']}][{COLORS['dim']}]{', '.join(ctx.tech_stack)}[/{COLORS['dim']}]")
+            console.print(f"  [{COLORS['green']}]● Prediction:[/{COLORS['green']}][{COLORS['dim']}] {ctx.project_prediction}[/{COLORS['dim']}]\n")
 
         self.running = True
 

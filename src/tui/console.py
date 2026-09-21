@@ -23,6 +23,7 @@ COLORS = {
     "dim":      "#6272a4",
     "bg_dark":  "#282a36",
     "bg_line":  "#44475a",
+    "shadow":   "#333645",
 }
 
 custom_theme = Theme({
@@ -76,38 +77,46 @@ TIPS = [
 ]
 
 
-def _add_shadow(lines: list, dx: int = 2, dy: int = 1, fg_char: str = "█", shadow_char: str = "S") -> list:
-    """Programmatically adds a drop shadow to ASCII art."""
+def _add_shadow(lines: list[str], dx: int = 1, dy: int = 1) -> list[str]:
+    """
+    Given a list of strings representing ASCII art, returns a new list of strings
+    where a shadow (represented by 'S') is drawn at an offset of (dx, dy).
+    """
     height = len(lines)
-    width = max(len(line) for line in lines) if lines else 0
+    if height == 0:
+        return []
     
+    width = max(len(line) for line in lines)
     canvas_height = height + dy
     canvas_width = width + dx
+
+    # Create empty canvas
     canvas = [[" " for _ in range(canvas_width)] for _ in range(canvas_height)]
-    
+
+    # Draw shadow first
     for y, line in enumerate(lines):
         for x, char in enumerate(line):
-            if char == fg_char:
-                canvas[y + dy][x + dx] = shadow_char
-                
+            if char != " ":
+                canvas[y + dy][x + dx] = "S"
+
+    # Draw foreground on top
     for y, line in enumerate(lines):
         for x, char in enumerate(line):
-            if char == fg_char:
-                canvas[y][x] = fg_char
-                
+            if char != " ":
+                canvas[y][x] = char
+
     return ["".join(row).rstrip() for row in canvas]
 
 
-def _apply_rainbow(lines: list) -> Text:
-    """Apply a horizontal rainbow gradient to block character lines and render shadows."""
+def _apply_rainbow(lines: list[str]) -> Text:
+    """Applies the horizontal rainbow gradient to a list of ASCII strings."""
     text = Text()
     for line in lines:
         for i, char in enumerate(line):
             if char == "█":
-                color = RAINBOW[min(i, len(RAINBOW) - 1)]
-                text.append(char, style=f"bold {color}")
+                text.append("█", style=f"bold {RAINBOW[min(i, len(RAINBOW) - 1)]}")
             elif char == "S":
-                text.append("█", style=COLORS["bg_line"])
+                text.append("█", style=COLORS["shadow"])
             else:
                 text.append(char)
         text.append("\n")
@@ -147,7 +156,7 @@ def print_welcome():
                     color = RAINBOW[min(i, len(RAINBOW) - 1)]
                     building_title.append(char, style=f"bold {color}")
                 elif char == "S":
-                    building_title.append("█", style=COLORS["bg_line"])
+                    building_title.append("█", style=COLORS["shadow"])
                 else:
                     building_title.append(char)
             building_title.append("\n")
