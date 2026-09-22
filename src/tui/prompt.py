@@ -37,8 +37,10 @@ class SlashCommandCompleter(Completer):
     COMMANDS = {
         '/help':  'Show available commands',
         '/clear': 'Clear screen',
-        '/quit':  'Exit Indent',
-        '/exit':  'Exit Indent',
+        '/quit':  'Exit Indent and save session',
+        '/quit!': 'Exit Indent without saving',
+        '/exit':  'Exit Indent and save session',
+        '/exit!': 'Exit Indent without saving',
     }
 
     def get_completions(self, document, complete_event):

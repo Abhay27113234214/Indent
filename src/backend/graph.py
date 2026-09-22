@@ -91,9 +91,10 @@ def workspace_analyzer(state: IndentState) -> dict:
         f"Directory Structure:\n{', '.join(tree_structure)}\n\n"
         f"File Contents:\n{file_contents}\n"
         "Based on this information, please provide:\n"
-        "1. An initial summary of the codebase.\n"
+        "1. An extremely dense and detailed ledger of the project's current state, architectures, and accomplishments (current_state).\n"
         "2. An identification of the libraries, languages, or frameworks being used.\n"
-        "3. An educated prediction of what the user is trying to build."
+        "3. An educated prediction of what the user is trying to build.\n"
+        "4. A structural overview."
     )
     
     result = structured_llm.invoke(prompt)
@@ -117,12 +118,12 @@ def query_planner(state: IndentState) -> dict:
     ctx = state.get("workspace_context")
     query = state.get("user_query", "")
     
-    summary = ctx.summary if ctx else "No context"
-    stack = ctx.tech_stack if ctx else "No stack"
+    current_state_str = ctx.current_state if hasattr(ctx, 'current_state') else (ctx.get("current_state", "No context") if isinstance(ctx, dict) else "No context")
+    stack = ctx.tech_stack if hasattr(ctx, 'tech_stack') else (ctx.get("tech_stack", []) if isinstance(ctx, dict) else "No stack")
     
     prompt = (
         "You are the Indent query planner.\n"
-        f"Workspace Summary: {summary}\n"
+        f"Workspace State: {current_state_str}\n"
         f"Tech Stack: {stack}\n\n"
         f"User Query: {query}\n\n"
         "Draft an execution plan. Do not make assumptions about missing architectural details. "
@@ -244,10 +245,12 @@ def code_generator(state: IndentState) -> dict:
     structured_llm = model.with_structured_output(CodeGeneratorOutput, strict=True)
     
     ctx = state.get("workspace_context")
+    current_state_str = ctx.current_state if hasattr(ctx, 'current_state') else (ctx.get("current_state", "None") if isinstance(ctx, dict) else "None")
+    
     prompt = (
         "You are the Indent Code Generator.\n"
         f"Approved Plan:\n{state.get('plan')}\n\n"
-        f"Workspace Context:\n{ctx.summary if ctx else 'None'}\n\n"
+        f"Workspace Context:\n{current_state_str}\n\n"
         "Generate the exact list of file edits needed to implement this plan."
     )
     result = structured_llm.invoke(prompt)
@@ -261,28 +264,47 @@ def file_writing_agent(state: IndentState) -> dict:
     
     edits = state.get("file_edits", [])
     for edit in edits:
-        file_path = edit.get("file_path")
+        original_path = edit.get("file_path", "")
         action = edit.get("action", "").lower()
         search_block = edit.get("search_block", "")
         replace_block = edit.get("replace_block", "")
         
+        safe_path = original_path.lstrip("/\\")
+        if safe_path.startswith("." + os.sep) or safe_path.startswith("./"):
+            safe_path = safe_path[2:]
+            
+        abs_path = os.path.abspath(safe_path)
+        
         try:
             if action == "new":
-                dir_name = os.path.dirname(os.path.abspath(file_path))
+                dir_name = os.path.dirname(abs_path)
                 if dir_name:
                     os.makedirs(dir_name, exist_ok=True)
-                with open(file_path, "w", encoding="utf-8") as f:
+                with open(abs_path, "w", encoding="utf-8") as f:
                     f.write(replace_block)
             else:
-                if not os.path.exists(file_path):
-                    console.print(f"[{COLORS['red']}]Warning: File {file_path} does not exist for edit action '{action}'[/{COLORS['red']}]")
-                    continue
-                    
-                with open(file_path, "r", encoding="utf-8") as f:
+                if not os.path.exists(abs_path):
+                    basename = os.path.basename(safe_path)
+                    found = False
+                    for root_dir, dirs, files in os.walk("."):
+                        dirs[:] = [d for d in dirs if d not in [".git", "node_modules", "venv", "__pycache__"]]
+                        if basename in files:
+                            abs_path = os.path.abspath(os.path.join(root_dir, basename))
+                            found = True
+                            break
+                            
+                    if not found:
+                        console.print(f"[{COLORS['red']}]Warning: File '{original_path}' does not exist for edit action '{action}'[/{COLORS['red']}]")
+                        continue
+                    else:
+                        rel = os.path.relpath(abs_path)
+                        console.print(f"[{COLORS['yellow']}]Note: Auto-resolved '{original_path}' to '{rel}'[/{COLORS['yellow']}]")
+                        
+                with open(abs_path, "r", encoding="utf-8") as f:
                     content = f.read()
                     
                 if search_block and search_block not in content:
-                    console.print(f"[{COLORS['yellow']}]Warning: Search block not found in {file_path}. Skipping replacement.[/{COLORS['yellow']}]")
+                    console.print(f"[{COLORS['yellow']}]Warning: Search block not found in {os.path.relpath(abs_path)}. Skipping replacement.[/{COLORS['yellow']}]")
                     continue
                     
                 if action == "replace":
@@ -292,12 +314,45 @@ def file_writing_agent(state: IndentState) -> dict:
                 elif action == "add":
                     content = content.replace(search_block, search_block + "\n" + replace_block)
                     
-                with open(file_path, "w", encoding="utf-8") as f:
+                with open(abs_path, "w", encoding="utf-8") as f:
                     f.write(content)
+                    
         except Exception as e:
-            console.print(f"[{COLORS['red']}]Error writing to {file_path}: {e}[/{COLORS['red']}]")
+            console.print(f"[{COLORS['red']}]Error writing to {original_path}: {e}[/{COLORS['red']}]")
             
     return {}
+
+def incremental_state_updater(state: IndentState) -> dict:
+    """Rewrites the current_state string integrating the new file edits."""
+    from .state import IncrementalStateOutput
+    structured_llm = model.with_structured_output(IncrementalStateOutput, strict=True)
+    
+    ctx = state.get("workspace_context")
+    current_state = ctx.current_state if hasattr(ctx, 'current_state') else (ctx.get("current_state", "No previous state.") if isinstance(ctx, dict) else "No previous state.")
+    
+    prompt = (
+        "You are the Indent State Updater.\n"
+        f"Previous State Context:\n{current_state}\n\n"
+        f"Executed File Edits:\n{state.get('file_edits', [])}\n\n"
+        "Rewrite the dense current_state ledger to completely incorporate these new modifications and the latest architectural reality."
+    )
+    result = structured_llm.invoke(prompt)
+    
+    new_ctx = ctx.copy() if isinstance(ctx, dict) else (ctx.model_dump() if hasattr(ctx, 'model_dump') else {})
+    new_ctx["current_state"] = result.updated_state
+    
+    return {
+        "workspace_context": new_ctx
+    }
+
+def route_start(state: IndentState) -> str:
+    """Conditionally bypasses workspace analysis if the user opted to skip it."""
+    if state.get("skip_analysis"):
+        query = state.get("user_query", "")
+        if query and query.strip():
+            return "query_planner"
+        return END
+    return "workspace_analyzer"
 
 def build_graph():
     builder = StateGraph(IndentState)
@@ -315,8 +370,13 @@ def build_graph():
     builder.add_node("reset_state", reset_state)
     builder.add_node("code_generator", code_generator)
     builder.add_node("file_writing_agent", file_writing_agent)
+    builder.add_node("incremental_state_updater", incremental_state_updater)
     
-    builder.add_edge(START, "workspace_analyzer")
+    builder.add_conditional_edges(
+        START,
+        route_start,
+        {"workspace_analyzer": "workspace_analyzer", "query_planner": "query_planner", END: END}
+    )
     
     builder.add_conditional_edges("workspace_analyzer", check_for_query, {"query_planner": "query_planner", END: END})
     builder.add_conditional_edges("query_planner", check_for_questions, {"ask_user_questions": "ask_user_questions", "ask_plan_approval": "ask_plan_approval"})
@@ -330,7 +390,8 @@ def build_graph():
     builder.add_conditional_edges("ask_revised_plan_approval", check_revised_approval, {"code_generator": "code_generator", "reset_state": "reset_state"})
     builder.add_edge("reset_state", END)
     builder.add_edge("code_generator", "file_writing_agent")
-    builder.add_edge("file_writing_agent", END)
+    builder.add_edge("file_writing_agent", "incremental_state_updater")
+    builder.add_edge("incremental_state_updater", END)
     
     return builder.compile(checkpointer=MemorySaver())
 

@@ -90,16 +90,13 @@ def _add_shadow(lines: list[str], dx: int = 1, dy: int = 1) -> list[str]:
     canvas_height = height + dy
     canvas_width = width + dx
 
-    # Create empty canvas
     canvas = [[" " for _ in range(canvas_width)] for _ in range(canvas_height)]
 
-    # Draw shadow first
     for y, line in enumerate(lines):
         for x, char in enumerate(line):
             if char != " ":
                 canvas[y + dy][x + dx] = "S"
 
-    # Draw foreground on top
     for y, line in enumerate(lines):
         for x, char in enumerate(line):
             if char != " ":

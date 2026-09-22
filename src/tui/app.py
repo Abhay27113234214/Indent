@@ -20,31 +20,63 @@ class IndentCLI:
 
     def run(self):
         import sys
+        import os
+        import glob
         
         print_welcome()
 
-        console.print(f"\n[{COLORS['yellow']}]Do you grant permission to analyze the workspace?[/{COLORS['yellow']}]")
-        permission = input(" (y/n) > ").strip().lower()
+        indent_dir = ".indent"
+        session_files = glob.glob(os.path.join(indent_dir, "*.json")) if os.path.exists(indent_dir) else []
         
-        if permission not in ['y', 'yes']:
-            print("we need permission to analyze the code base to work")
-            sys.exit(0)
-            
         from backend.graph import indent_graph
-        
         config = {"configurable": {"thread_id": "session_1"}}
-        
-        with console.status(f"[{COLORS['dim']}]Running workspace_analyzer node...[/{COLORS['dim']}]", spinner="dots"):
-            state = indent_graph.invoke({"messages": []}, config=config)
-            
-        console.print(f"[{COLORS['green']}]Workspace analyzed successfully![/{COLORS['green']}]")
-        ctx = state.get("workspace_context")
-        if ctx:
-            console.print(f"  [{COLORS['cyan']}]● Summary:   [/{COLORS['cyan']}][{COLORS['dim']}]{ctx.summary}[/{COLORS['dim']}]")
-            console.print(f"  [{COLORS['purple']}]● Stack:     [/{COLORS['purple']}][{COLORS['dim']}]{', '.join(ctx.tech_stack)}[/{COLORS['dim']}]")
-            console.print(f"  [{COLORS['green']}]● Prediction:[/{COLORS['green']}][{COLORS['dim']}] {ctx.project_prediction}[/{COLORS['dim']}]\n")
 
-        self.running = True
+        if session_files:
+            console.print(f"\n[{COLORS['yellow']}]Found {len(session_files)} existing session(s) in .indent/[/{COLORS['yellow']}]")
+            for i, f in enumerate(session_files):
+                console.print(f"  [{COLORS['cyan']}]{i+1}. {os.path.basename(f)}[/{COLORS['cyan']}]")
+            console.print(f"\n[{COLORS['dim']}]Start a new chat or load an existing session? (type 'new' or a number)[/{COLORS['dim']}]")
+            
+            choice = input(" > ").strip().lower()
+            if choice.isdigit() and 1 <= int(choice) <= len(session_files):
+                filepath = session_files[int(choice)-1]
+                from backend.persistence import load_session_from_json
+                
+                with console.status(f"[{COLORS['cyan']}]Loading session from {filepath}...[/{COLORS['cyan']}]", spinner="dots"):
+                    loaded_state = load_session_from_json(filepath)
+                    indent_graph.update_state(config, loaded_state)
+                    
+                console.print(f"[{COLORS['green']}]Session loaded successfully![/{COLORS['green']}]")
+                
+                ctx = loaded_state.get("workspace_context", {})
+                curr_state = ctx.get("current_state", "No state available.") if isinstance(ctx, dict) else (ctx.current_state if hasattr(ctx, 'current_state') else "No state available.")
+                console.print(f"\n[{COLORS['purple']} bold]Current Project State:[/{COLORS['purple']} bold]")
+                console.print(Markdown(curr_state, code_theme="dracula"))
+                
+                self.running = True
+
+        if getattr(self, 'running', False) is False:
+            console.print(f"\n[{COLORS['yellow']}]Do you grant permission to analyze the workspace?[/{COLORS['yellow']}]")
+            permission = input(" (y/n) > ").strip().lower()
+            
+            if permission not in ['y', 'yes']:
+                console.print(f"[{COLORS['dim']}]Starting fresh without workspace context...[/{COLORS['dim']}]")
+                indent_graph.invoke({"skip_analysis": True}, config=config)
+            else:
+                with console.status(f"[{COLORS['dim']}]Running workspace_analyzer node...[/{COLORS['dim']}]", spinner="dots"):
+                    state = indent_graph.invoke({"messages": []}, config=config)
+                    
+                console.print(f"[{COLORS['green']}]Workspace analyzed successfully![/{COLORS['green']}]")
+                ctx = state.get("workspace_context")
+                if ctx:
+                    curr_state = ctx.get("current_state", "None") if isinstance(ctx, dict) else getattr(ctx, "current_state", "None")
+                    stack = ctx.get("tech_stack", []) if isinstance(ctx, dict) else getattr(ctx, "tech_stack", [])
+                    pred = ctx.get("project_prediction", "None") if isinstance(ctx, dict) else getattr(ctx, "project_prediction", "None")
+                    console.print(f"  [{COLORS['cyan']}]● State:       [/{COLORS['cyan']}][{COLORS['dim']}]{curr_state[:100]}...[/{COLORS['dim']}]")
+                    console.print(f"  [{COLORS['purple']}]● Stack:     [/{COLORS['purple']}][{COLORS['dim']}]{', '.join(stack)}[/{COLORS['dim']}]")
+                    console.print(f"  [{COLORS['green']}]● Prediction:[/{COLORS['green']}][{COLORS['dim']}] {pred}[/{COLORS['dim']}]\n")
+
+            self.running = True
 
         while self.running:
             try:
@@ -96,9 +128,26 @@ class IndentCLI:
     def handle_command(self, text: str):
         console.print(f"[{COLORS['green']} bold]>>[/{COLORS['green']} bold] [{COLORS['green']}]{text}[/{COLORS['green']}]")
 
-        cmd = text.lower()
+        parts = text.strip().split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else None
+
         if cmd in ('/quit', '/exit'):
             self.running = False
+            
+            from backend.graph import indent_graph
+            from backend.persistence import save_session_to_json
+            config = {"configurable": {"thread_id": "session_1"}}
+            snapshot = indent_graph.get_state(config)
+            
+            with console.status(f"[{COLORS['cyan']}]Saving session to .indent/...[/{COLORS['cyan']}]", spinner="dots"):
+                filepath = save_session_to_json(snapshot.values, custom_filename=arg)
+                
+            console.print(f"[{COLORS['green']}]Session saved to {filepath}[/{COLORS['green']}]")
+            print_goodbye()
+        elif cmd in ('/quit!', '/exit!', '/quit-nosave', '/exit-nosave', '/drop'):
+            self.running = False
+            console.print(f"[{COLORS['yellow']}]Exiting without saving session.[/{COLORS['yellow']}]")
             print_goodbye()
         elif cmd == '/help':
             self._print_help()
@@ -123,10 +172,11 @@ class IndentCLI:
         help_table.add_column("Command",     style=f"{COLORS['green']} bold", min_width=12)
         help_table.add_column("Description", style=COLORS["white"])
 
-        help_table.add_row("/help",   "Show this help message")
-        help_table.add_row("/clear",  "Clear screen and show the welcome banner")
-        help_table.add_row("/quit",   "Exit Indent")
-        help_table.add_row("!<cmd>",  "Run a bash command (e.g. !ls -la)")
+        help_table.add_row("/help",        "Show this help message")
+        help_table.add_row("/clear",       "Clear screen and show the welcome banner")
+        help_table.add_row("/quit [name]", "Exit Indent and save session (optionally specify a name)")
+        help_table.add_row("/quit!",       "Exit Indent without saving")
+        help_table.add_row("!<cmd>",       "Run a bash command (e.g. !ls -la)")
 
         console.print(help_table)
 

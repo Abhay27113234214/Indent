@@ -68,6 +68,7 @@ coverage.xml
 cover/
 test.*
 test_prompt.py
+test_project
 
 # REPL history
 .python_history
@@ -75,3 +76,4 @@ test_prompt.py
 
 flow.png
 indent.bat
+.indent
