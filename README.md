@@ -24,8 +24,6 @@ Most "AI coding agent" demos either dump code straight into your repo with no re
 
 Indent is implemented as a LangGraph state graph. Every box below is a real node in the graph, and every diamond is a real conditional edge — this isn't a simplified marketing diagram, it's close to how `src/backend/graph.py` is actually wired.
 
-![Indent workflow diagram](flow.jpeg)
-
 The diagram above shows the core planning/execution loop, which hasn't changed. What's new sits at the two ends of it — how a session *starts* and what happens right after files are written — described below.
 
 Walking through it:
