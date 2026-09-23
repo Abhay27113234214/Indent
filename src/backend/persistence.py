@@ -8,7 +8,7 @@ from .graph import model
 class TitleOutput(BaseModel):
     title: str = Field(description="A short, url-safe hyphenated filename (e.g., add-postgres-database).")
 
-def save_session_to_json(state: dict, save_dir: str = ".indent", custom_filename: str = None) -> str:
+def save_session_to_json(state: dict, save_dir: str = ".indent", custom_filename: str = None, overwrite: bool = False) -> str:
     """Deterministically dumps the active LangGraph state to a JSON file in the given directory."""
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
@@ -34,12 +34,13 @@ def save_session_to_json(state: dict, save_dir: str = ".indent", custom_filename
                     filename = "session"
             except Exception:
                 filename = "session"
-            
-    base_filename = filename
-    counter = 1
-    while os.path.exists(os.path.join(save_dir, f"{filename}.json")):
-        filename = f"{base_filename}-{counter}"
-        counter += 1
+                
+    if not overwrite:
+        base_filename = filename
+        counter = 1
+        while os.path.exists(os.path.join(save_dir, f"{filename}.json")):
+            filename = f"{base_filename}-{counter}"
+            counter += 1
         
     filepath = os.path.join(save_dir, f"{filename}.json")
     

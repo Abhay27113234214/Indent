@@ -91,7 +91,7 @@ def workspace_analyzer(state: IndentState) -> dict:
         f"Directory Structure:\n{', '.join(tree_structure)}\n\n"
         f"File Contents:\n{file_contents}\n"
         "Based on this information, please provide:\n"
-        "1. An extremely dense and detailed ledger of the project's current state, architectures, and accomplishments (current_state).\n"
+        "1. An extremely dense and detailed ledger of the project's current state, architectures, and accomplishments (current_state). Describe the logic, relationships, and structural decisions in plain English. DO NOT include raw code snippets, diffs, or literal file contents.\n"
         "2. An identification of the libraries, languages, or frameworks being used.\n"
         "3. An educated prediction of what the user is trying to build.\n"
         "4. A structural overview."
@@ -334,7 +334,8 @@ def incremental_state_updater(state: IndentState) -> dict:
         "You are the Indent State Updater.\n"
         f"Previous State Context:\n{current_state}\n\n"
         f"Executed File Edits:\n{state.get('file_edits', [])}\n\n"
-        "Rewrite the dense current_state ledger to completely incorporate these new modifications and the latest architectural reality."
+        "Rewrite the dense current_state ledger to completely incorporate these new modifications and the latest architectural reality. "
+        "Summarize the logic, architectures, and design patterns in plain English. ABSOLUTELY DO NOT include raw code blocks, code diffs, or literal file contents in your output."
     )
     result = structured_llm.invoke(prompt)
     

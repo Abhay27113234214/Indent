@@ -17,6 +17,73 @@ class IndentCLI:
         self.session = get_session()
         self.running = False
         self.turn_count = 0
+        self.active_session_name = None
+
+    def _interactive_menu(self, options: list[str], title: str) -> int:
+        import sys
+        from rich.live import Live
+        from rich.text import Text
+        
+        selected = 0
+        
+        def generate_renderable():
+            text = Text.from_markup(f"\n[{COLORS['dim']}]{title}[/{COLORS['dim']}]\n")
+            for i, opt in enumerate(options):
+                if i == selected:
+                    text.append(Text.from_markup(f"  [{COLORS['green']}]❯ {opt}[/{COLORS['green']}]\n"))
+                else:
+                    text.append(Text.from_markup(f"    [{COLORS['dim']}]{opt}[/{COLORS['dim']}]\n"))
+            return text
+
+        try:
+            import termios
+            import tty
+            fd = sys.stdin.fileno()
+            try:
+                old_settings = termios.tcgetattr(fd)
+            except termios.error:
+                raise ImportError("Not a valid TTY")
+                
+            try:
+                with Live(generate_renderable(), console=console, refresh_per_second=20, transient=False) as live:
+                    tty.setcbreak(fd)
+                    while True:
+                        ch = sys.stdin.read(1)
+                        if ch == '\x1b':
+                            ch2 = sys.stdin.read(2)
+                            if ch2 == '[A': selected = max(0, selected - 1)
+                            elif ch2 == '[B': selected = min(len(options) - 1, selected + 1)
+                        elif ch in ('\r', '\n'): break
+                        elif ch == '\x03': raise KeyboardInterrupt
+                        live.update(generate_renderable())
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            return selected
+
+        except ImportError:
+            try:
+                import msvcrt
+                with Live(generate_renderable(), console=console, refresh_per_second=20, transient=False) as live:
+                    while True:
+                        ch = msvcrt.getch()
+                        if ch in (b'\r', b'\n'):
+                            break
+                        elif ch == b'\x03':
+                            raise KeyboardInterrupt
+                        elif ch in (b'\xe0', b'\x00'):
+                            ch2 = msvcrt.getch()
+                            if ch2 == b'H': selected = max(0, selected - 1)
+                            elif ch2 == b'P': selected = min(len(options) - 1, selected + 1)
+                        live.update(generate_renderable())
+                return selected
+            except ImportError:
+                console.print(f"\n[{COLORS['dim']}]{title}[/{COLORS['dim']}]")
+                for i, opt in enumerate(options):
+                    console.print(f"  {i+1}. {opt}")
+                try:
+                    return int(input(" > ")) - 1
+                except ValueError:
+                    return 0
 
     def run(self):
         import sys
@@ -32,14 +99,12 @@ class IndentCLI:
         config = {"configurable": {"thread_id": "session_1"}}
 
         if session_files:
-            console.print(f"\n[{COLORS['yellow']}]Found {len(session_files)} existing session(s) in .indent/[/{COLORS['yellow']}]")
-            for i, f in enumerate(session_files):
-                console.print(f"  [{COLORS['cyan']}]{i+1}. {os.path.basename(f)}[/{COLORS['cyan']}]")
-            console.print(f"\n[{COLORS['dim']}]Start a new chat or load an existing session? (type 'new' or a number)[/{COLORS['dim']}]")
+            options = ["Start a new chat"] + [os.path.basename(f) for f in session_files]
+            choice_idx = self._interactive_menu(options, "Select a session to resume, or start anew:")
             
-            choice = input(" > ").strip().lower()
-            if choice.isdigit() and 1 <= int(choice) <= len(session_files):
-                filepath = session_files[int(choice)-1]
+            if choice_idx > 0:
+                filepath = session_files[choice_idx - 1]
+                self.active_session_name = os.path.splitext(os.path.basename(filepath))[0]
                 from backend.persistence import load_session_from_json
                 
                 with console.status(f"[{COLORS['cyan']}]Loading session from {filepath}...[/{COLORS['cyan']}]", spinner="dots"):
@@ -140,8 +205,11 @@ class IndentCLI:
             config = {"configurable": {"thread_id": "session_1"}}
             snapshot = indent_graph.get_state(config)
             
+            custom_name = arg or self.active_session_name
+            is_explicit = custom_name is not None
+            
             with console.status(f"[{COLORS['cyan']}]Saving session to .indent/...[/{COLORS['cyan']}]", spinner="dots"):
-                filepath = save_session_to_json(snapshot.values, custom_filename=arg)
+                filepath = save_session_to_json(snapshot.values, custom_filename=custom_name, overwrite=is_explicit)
                 
             console.print(f"[{COLORS['green']}]Session saved to {filepath}[/{COLORS['green']}]")
             print_goodbye()

@@ -4,14 +4,14 @@ from pydantic import BaseModel, Field
 
 class WorkspaceContext(BaseModel):
     """Structured output schema for the workspace_analyzer LLM node."""
-    current_state: str = Field(description="Extremely dense and detailed ledger of the project's current state, architectures, and accomplishments.")
+    current_state: str = Field(description="Detailed architectural ledger of the project's state and accomplishments, written in plain English without any raw code snippets.")
     tech_stack: list[str] = Field(description="List of detected languages, frameworks, and tools.")
     structure_overview: str = Field(description="A brief overview of the directory structure.")
     project_prediction: str = Field(description="An educated guess on what the user is trying to build or achieve.")
 
 class IncrementalStateOutput(BaseModel):
     """Structured output for the incremental_state_updater node."""
-    updated_state: str = Field(description="The rewritten current_state string integrating the new file edits.")
+    updated_state: str = Field(description="The rewritten current_state string integrating the new file edits, in plain English with absolutely NO code snippets.")
 
 class QueryPlannerOutput(BaseModel):
     """Structured output for the query_planner LLM node."""
