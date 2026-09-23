@@ -76,7 +76,6 @@ TIPS = [
     "Use [bold]/help[/bold] to see all available commands",
 ]
 
-
 def _add_shadow(lines: list[str], dx: int = 1, dy: int = 1) -> list[str]:
     """
     Given a list of strings representing ASCII art, returns a new list of strings
@@ -104,10 +103,9 @@ def _add_shadow(lines: list[str], dx: int = 1, dy: int = 1) -> list[str]:
 
     return ["".join(row).rstrip() for row in canvas]
 
-
 def _apply_rainbow(lines: list[str]) -> Text:
     """Applies the horizontal rainbow gradient to a list of ASCII strings."""
-    text = Text()
+    text = Text(no_wrap=True)
     for line in lines:
         for i, char in enumerate(line):
             if char == "█":
@@ -119,6 +117,44 @@ def _apply_rainbow(lines: list[str]) -> Text:
         text.append("\n")
     return text
 
+class OutlineShadowBox:
+    """A custom renderable that wraps another renderable with an outline-style drop shadow (like claude-code)."""
+    def __init__(self, renderable):
+        self.renderable = renderable
+
+    def __rich_measure__(self, console, options):
+        from rich.measure import Measurement
+        measurement = Measurement.get(console, options, self.renderable)
+        return Measurement(measurement.maximum + 1, measurement.maximum + 1)
+
+    def __rich_console__(self, console, options):
+        from rich.measure import Measurement
+        from rich.segment import Segment
+        from rich.style import Style
+        
+        measurement = Measurement.get(console, options, self.renderable)
+        width = measurement.maximum
+        
+        lines = console.render_lines(self.renderable, options.update(width=width))
+        shadow_style = Style(color=COLORS["dim"])
+        
+        for i, line in enumerate(lines):
+            if i == 0:
+                yield from line
+                yield Segment("\n")
+            elif i == 1:
+                yield from line
+                yield Segment("╮", shadow_style)
+                yield Segment("\n")
+            else:
+                yield from line
+                yield Segment("│", shadow_style)
+                yield Segment("\n")
+                
+        if lines:
+            yield Segment(" ╰", shadow_style)
+            yield Segment("─" * (width - 2), shadow_style)
+            yield Segment("╯\n", shadow_style)
 
 def print_welcome():
     """
@@ -132,20 +168,24 @@ def print_welcome():
 
     logo = _apply_rainbow(shadowed_logo_lines)
     
-    details = Table(show_header=False, box=None, padding=(0, 1))
+    from rich import box
+    details_inner = Table(show_header=False, box=None, padding=(0, 1))
     user_name = getpass.getuser()
     cwd = os.getcwd()
     now = datetime.now().strftime("%b %d, %Y  %H:%M")
 
-    details.add_row("")
-    details.add_row(f"[{COLORS['dim']}]  ●  User  [/{COLORS['dim']}] [{COLORS['green']}]{user_name}[/{COLORS['green']}]")
-    details.add_row(f"[{COLORS['dim']}]  ●  Model [/{COLORS['dim']}] [{COLORS['purple']}]Gemini 3.1 Pro[/{COLORS['purple']}]")
-    details.add_row(f"[{COLORS['dim']}]  ●  Path  [/{COLORS['dim']}] [{COLORS['yellow']}]{cwd}[/{COLORS['yellow']}]")
-    details.add_row(f"[{COLORS['dim']}]  ●  Time  [/{COLORS['dim']}] [{COLORS['orange']}]{now}[/{COLORS['orange']}]")
-    details.add_row("")
+    details_inner.add_row(f"[{COLORS['dim']}]  ●  User  [/{COLORS['dim']}] [{COLORS['green']}]{user_name}[/{COLORS['green']}]")
+    details_inner.add_row(f"[{COLORS['dim']}]  ●  Model [/{COLORS['dim']}] [{COLORS['purple']}]Gemini 3.1 Pro[/{COLORS['purple']}]")
+    details_inner.add_row(f"[{COLORS['dim']}]  ●  Path  [/{COLORS['dim']}] [{COLORS['yellow']}]{cwd}[/{COLORS['yellow']}]")
+    details_inner.add_row(f"[{COLORS['dim']}]  ●  Time  [/{COLORS['dim']}] [{COLORS['orange']}]{now}[/{COLORS['orange']}]")
+
+    details_box = Table(show_header=False, box=box.ROUNDED, border_style=COLORS["dim"], padding=(0, 1))
+    details_box.add_row(details_inner)
+    
+    details = OutlineShadowBox(details_box)
 
     with Live(console=console, refresh_per_second=20) as live:
-        building_title = Text()
+        building_title = Text(no_wrap=True)
 
         for line in shadowed_title_lines:
             for i, char in enumerate(line):
@@ -190,7 +230,6 @@ def print_welcome():
     tip = random.choice(TIPS)
     console.print(f"  [{COLORS['dim']}]💡 {tip}[/{COLORS['dim']}]")
     console.print()
-
 
 def print_goodbye():
     """Print a styled goodbye message on exit."""
