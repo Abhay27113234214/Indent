@@ -300,6 +300,30 @@ def file_writing_agent(state: IndentState) -> dict:
                         rel = os.path.relpath(abs_path)
                         console.print(f"[{COLORS['yellow']}]Note: Auto-resolved '{original_path}' to '{rel}'[/{COLORS['yellow']}]")
                         
+                if action == "rename":
+                    new_path = edit.get("new_file_path", "")
+                    if not new_path:
+                        console.print(f"[{COLORS['red']}]Error: No new_file_path provided for renaming {original_path}[/{COLORS['red']}]")
+                        continue
+                    
+                    safe_new_path = new_path.lstrip("/\\")
+                    if safe_new_path.startswith("." + os.sep) or safe_new_path.startswith("./"):
+                        safe_new_path = safe_new_path[2:]
+                    abs_new_path = os.path.abspath(safe_new_path)
+                    
+                    dir_name = os.path.dirname(abs_new_path)
+                    if dir_name:
+                        os.makedirs(dir_name, exist_ok=True)
+                        
+                    os.rename(abs_path, abs_new_path)
+                    console.print(f"[{COLORS['green']}]Renamed '{os.path.relpath(abs_path)}' to '{safe_new_path}'[/{COLORS['green']}]")
+                    continue
+                    
+                if action == "delete_file":
+                    os.remove(abs_path)
+                    console.print(f"[{COLORS['red']}]Deleted file '{os.path.relpath(abs_path)}'[/{COLORS['red']}]")
+                    continue
+
                 with open(abs_path, "r", encoding="utf-8") as f:
                     content = f.read()
                     

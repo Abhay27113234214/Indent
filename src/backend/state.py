@@ -29,9 +29,10 @@ class AlternateArchitectureOutput(BaseModel):
 class FileEdit(BaseModel):
     """A specific file edit operation."""
     file_path: str = Field(description="The relative path to the file.")
-    action: str = Field(description="The action to perform: 'new', 'replace', 'add', 'remove'")
-    search_block: str = Field(description="The exact text to find in the file. Empty if 'new'.")
-    replace_block: str = Field(description="The exact text to replace it with. Empty if 'remove'.")
+    new_file_path: str | None = Field(description="The new path for the file, only used if action is 'rename'.", default=None)
+    action: str = Field(description="The action to perform: 'new', 'replace', 'add', 'remove', 'rename', 'delete_file'")
+    search_block: str = Field(description="The exact text to find in the file. Empty if 'new', 'rename', or 'delete_file'.")
+    replace_block: str = Field(description="The exact text to replace it with. Empty if 'remove', 'rename', or 'delete_file'.")
 
 class CodeGeneratorOutput(BaseModel):
     """Structured output for the code_generator LLM node."""
