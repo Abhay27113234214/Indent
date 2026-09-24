@@ -172,7 +172,7 @@ class IndentCLI:
         console.print(f"[{COLORS['red']} bold]![/{COLORS['red']} bold] [{COLORS['red']}]{cmd}[/{COLORS['red']}]")
         if cmd:
             try:
-                result = subprocess.run(["bash", "-c", cmd], text=True, capture_output=True)
+                result = subprocess.run(["bash", "-c", cmd], text=True, capture_output=True, encoding="utf-8", errors="replace")
                 if result.stdout:
                     console.print(
                         Syntax(

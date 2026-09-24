@@ -78,3 +78,5 @@ flow.png
 indent.bat
 .indent
 test_ecommerce/
+test_workout_app/
+test_tasktracker/
